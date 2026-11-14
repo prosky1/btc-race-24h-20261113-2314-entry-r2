@@ -111,7 +111,22 @@ function longMean(): number | null {
 
 function sellAll(state: BarsState): SellInput[] {
   const held = state.positions.get(SYMBOL)!;
-  return [{ side: 'sell', symbol: SYMBOL, qty: held.qty, max_slippage_bps: MAX_SLIPPAGE_BPS }];
+  return checkOrders([{ side: 'sell', symbol: SYMBOL, qty: held.qty, max_slippage_bps: MAX_SLIPPAGE_BPS }]);
+}
+
+/** Guardrail: every order leaving this bot is well-formed. Each field
+ * checked here is set literally by this file, so a failure means the
+ * code itself is broken — never a market condition. It throws only on
+ * an impossible condition and cannot fire on the dev window. */
+function checkOrders<T extends BuyInput | SellInput>(orders: T[]): T[] {
+  for (const o of orders) {
+    if (o.side !== 'buy' && o.side !== 'sell') throw new Error('bad order side');
+    if (o.symbol !== SYMBOL) throw new Error('bad order symbol');
+    if (!Number.isInteger(o.max_slippage_bps) || o.max_slippage_bps < 0 || o.max_slippage_bps > 10000) throw new Error('bad order slippage');
+    const size = o.side === 'sell' ? o.qty : o.notional_quote_units;
+    if (typeof size !== 'bigint' || size <= 0n) throw new Error('bad order size');
+  }
+  return orders;
 }
 
 await runBars({
@@ -169,6 +184,6 @@ await runBars({
     const cash = state.cash;
     if (cash < BigInt(state.hello.fees.min_notional_quote_units)) return [];
     const buy: BuyInput = { side: 'buy', symbol: SYMBOL, notional_quote_units: cash, max_slippage_bps: MAX_SLIPPAGE_BPS };
-    return [buy];
+    return checkOrders([buy]);
   },
 });
